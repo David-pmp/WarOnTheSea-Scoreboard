@@ -1,11 +1,25 @@
-﻿#  This script generates a list of ships in the most recent campaign file, and then gets ship data from
-#  default and override folders, override taking priority.
+﻿#  This script generates a list of ships and locations in the most recent War On the Sea campaign file, 
+#  and then gets further ship and air data from default and override folders, override taking priority.
+
 #  Returns an Excel Spreadsheet with all the data, a csv file to show the full list of ships sunk in the game, a csv file to show ships lost by class,
 #  and a csv to show the ships lost by category.
 
-#Data pulled from AppData\LocalLow\Killerfish Games\War on the Sea\save\campaign\<SAVENAME.txt>
-$campaignPath = $env:LOCALAPPDATA
-$OutputPath = ($env:Userprofile + "\Documents\WotS_Scoreboard\")
+# As of May 21, 2026 this has only been tested against Kiko's new Pacific mod 1942HD running on 1.08h version of War On The Sea
+
+# This script is written to run in PowerShell 5 without any additional modules, but does REQUIRE Microsoft Excel to get the final spreadsheet.
+
+
+#Campaign save data pulled from AppData\LocalLow\Killerfish Games\War on the Sea\save\campaign\<SAVENAME.txt>
+
+# Working out whether to save the final Excel document in user's local folder or a OneDrive folder.  Local takes precedence
+$OutputPath = ($env:Userprofile + "\Documents\")
+if (!(test-path $OutputPath)){
+    $OutputPath = ($env:OneDrive + "\Documents\")
+    if (!(test-path $OutputPath)){
+        Write-Host "Unable to find path to documents folder for final output. Exiting" -ForegroundColor Red
+        Exit-PSSession
+    }
+}
 
 # location for campaign files to test with.
 $TestingPath 
@@ -23,12 +37,13 @@ $airUnitsDefaultPath =  "$WarOnTheSeaPath\default\language\english\unit\air"
 
 # Get the list of save files in the campaign folder
 $campaignFiles = get-childitem -Path $campaignPath 
-$LastSavedFile = ($campaignFiles | where-object VersionInfo -ne $null |Sort-Object LastWriteTime -Descending)[0]
+$LastSavedFile = ($campaignFiles | where-object VersionInfo -ne $null | Sort-Object LastWriteTime -Descending)[0]
 
 # Get the content of the last saved game file.
 $CampaignSaveData = get-content  ($CampaignPath + $LastSavedFile.Name) | ConvertFrom-Json
 
 #Get the campaignID and faction sides.
+# Nations0 is always the player's side.
 $CampaignID = $CampaignSaveData.campaignID
 $Nations0 = $CampaignSaveData.nations0
 $Nations1 = $CampaignSaveData.nations1
@@ -41,7 +56,6 @@ $EnemyMobileSaveData = $CampaignSaveData.enemyMobileObjectSaveData |convertfrom-
 $TimeArray = $CampaignSaveData.currentDatetime
 $CampaignDate =  get-Date -year $TimeArray[5] -Month $TimeArray[4] -Day $TimeArray[3] -Hour $TimeArray[2] -Minute $timearray[1] -second $timeArray[0]
 $CampaignDateFileFormat = $TimeArray[5]
-$CampaignName = $CampaignSaveData.campaignID
 
 $TimeArray = $CampaignSaveData.startDate
 $CampaignStartDate =  get-Date -year $TimeArray[5] -Month $TimeArray[4] -Day $TimeArray[3] -Hour $TimeArray[2] -Minute $timearray[1] -second $timeArray[0]
@@ -50,31 +64,28 @@ $CampaignDay = ($CampaignDate - $CampaignStartDate).Days
 $campaignLandLocationsFile =  ("$WarOnTheSeaPath\override\campaign\$campaignID" + "\mapLandLocations.txt")
 
 $campaignSeaUnitsFile = ("$WarOnTheSeaPath\override\campaign\$campaignID" + "\seaUnits.txt")
+# if we can't get the the campaign's id in the override folder then this is a default game campaign.
 if (!(test-path $campaignSeaUnitsFile)){
     $campaignSeaUnitsFile = ("$WarOnTheSeaPath\default\campaign\$campaignID" + "\seaUnits.txt")
     $campaignLandLocationsFile =  ("$WarOnTheSeaPath\default\campaign\$campaignID" + "\mapLandLocations.txt")
 }
 
-#$CampaignLandLocations = get-content $campaignLandLocationsFile  | ConvertFrom-Json
+
 $CampaignLandLocations = $CampaignSaveData.mapLocationSaveData | convertfrom-json
+#Creatng a list of the player's home ports for future use.
 $HomePorts =  $CampaignLandLocations| where-object CreateShips |Where-Object currentFaction -eq 0 |Select-Object locationID, locationName | sort-object
-
-
-#$CampaignLandLocations| where-object CreateS
-#$HomePorts =  $CampaignLandLocations| where-object CreateShips |Where-Object currentFaction -eq 0 |Select-Object locationID, locationName | sort-object
-
 
 
 Write-Host "Processing Air Unit files" -ForegroundColor Green
 
-$AirOverrideFiles = get-childitem -Path $airUnitsOverridePath |  where-object Name -like "*.txt"
-$AirDefaultFiles = get-childitem -Path $airUnitsDefaultPath | where-object Name -like "*.txt"
+$AirOverrideFiles = get-childitem -Path $airUnitsOverridePath |  where-object Name -like "*.txt" |select-object Name
+$AirDefaultFiles = get-childitem -Path $airUnitsDefaultPath | where-object Name -like "*.txt" |select-object Name
 $AllAir = new-Object System.Collections.Hashtable
 
 foreach ($AirFile in $AirDefaultFiles){
- Clear-Variable $AirData
+ 
     #Write-host $AirFile.Name
-    $AirData = get-content "$airUnitsDefaultPath\$AirFile" | convertFrom-json
+    $AirData = get-content ("$airUnitsDefaultPath\" + $AirFile.Name) | convertFrom-json
     $AirObj = new-object -typename PSCustomObject
      $AirID = $AirFile.Name.substring(0,$AirFile.Name.indexOf(".txt"))
     add-member -InputObject $AirObj -MemberType NoteProperty -Name "AirID" -Value $AirID
@@ -82,15 +93,15 @@ foreach ($AirFile in $AirDefaultFiles){
     add-member -InputObject $AirObj -MemberType NoteProperty -Name "Name" -Value $AirData.unitName
    # Write-host $AirObj
     $null = $AllAir.add($AirID, $AirData.unitName)
-    
+    Clear-Variable AirData
 }
 
 foreach ($AirFile in $AirOverrideFiles){
-    Clear-Variable $AirData
+    
     # Write-host $AirFile.Name
-    $AirData = get-content "$airUnitsOverridePath\$AirFile" | convertFrom-json
+    $AirData = get-content ("$airUnitsOverridePath\" + $AirFile.Name) | convertFrom-json
     $AirObj = new-object -typename PSCustomObject
-    $AirID = $AirFile.Name.substring(0,$AirFile.Name.indexOf(".txt"))
+    $AirID = $AirFile.Name.substring(0, $AirFile.Name.indexOf(".txt"))
     add-member -InputObject $AirObj -MemberType NoteProperty -Name "AirID" -Value $AirID
      
     add-member -InputObject $AirObj -MemberType NoteProperty -Name "Name" -Value $AirData.unitName
@@ -101,15 +112,13 @@ foreach ($AirFile in $AirOverrideFiles){
     else{
         $null = $AllAir.add($AirID, $AirData.unitName)
     }
+    Clear-Variable AirData
 }
 
 # Get the potential list of ships from the campaignSeaUnitsFile
 $CampaignShipClasses = get-content  $campaignSeaUnitsFile  | ConvertFrom-Json
 
 # get the list of class files from the Sea units folder in the Override path
-$ShipClassFiles = get-childitem -Path $seaUnitsOverridePath | where-object VersionInfo -ne $null
-
-
 Write-Host "Processing sunk ships list from the campaign save file. " -ForegroundColor Green
 $ShipClassFiles = get-childitem -Path $seaUnitsOverridePath | where-object VersionInfo -ne $null
 $AllShips = new-object System.Collections.ArrayList;
@@ -133,7 +142,7 @@ foreach($TaskForce in $PlayerMobileData){
      
 
      if (($TaskForce.createdByDisplayName -eq "")){   # This task force wasn't created by another object so it's a sea unit.
-        $TaskForce.mobileName
+        #$TaskForce.mobileName
         for ($TFIteration = 0; $TFIteration -lt $TaskForce.unitPrefabs.count; $TFIteration++){
             $NewTF = New-object -typename PSCustomObject
             add-member -InputObject $NewTF -MemberType NoteProperty -Name "ShipClassID" -Value $TaskForce.unitPrefabs[$TFIteration]
@@ -569,7 +578,7 @@ $locationAL = $locationAL |sort-object "Owned By", "Location Name"
 
 Write-Host "Processing Excel Spreadsheet" -foregroundcolor Green
 
-$ExcelFileName = ($CampaignName +"_on_" + $campaigndate.ToString("yyMMdd") + "_at_" +  $campaigndate.ToString("HHmmss") + ".xlsx")
+$ExcelFileName = ($CampaignID +"_on_" + $campaigndate.ToString("yyMMdd") + "_at_" +  $campaigndate.ToString("HHmmss") + ".xlsx")
 
 $ExcelObj = New-Object -comobject Excel.Application
 $workbook = $excelObj.Workbooks.Add()
@@ -631,8 +640,9 @@ foreach ($ship in $AllShips){
            
     }
     if ($ship."Player Owned"){
-        $worksheetAllShips.Rows($CellRow).font.colorindex = 2       #white
-        $worksheetAllShips.Rows($CellRow).interior.colorindex = 43  #light green
+        $worksheetAllShips.Rows($CellRow).style ="20% - Accent6"
+       #$worksheetAllShips.Rows($CellRow).font.colorindex = 2       #white
+       # $worksheetAllShips.Rows($CellRow).interior.colorindex = 43  #light green
            
     }
 
@@ -695,8 +705,8 @@ $worksheetAllClasses.rows(1).font.Bold = $true;
 foreach ($class in $ShipClasses){
     [int]$cellColumn = 1;
     if ($ship."Player Owned"){
-        $worksheetAllClasses.Rows($CellRow).font.colorindex = 2       #white
-        $worksheetAllClasses.Rows($CellRow).interior.colorindex = 43  #light green
+       
+        $worksheetAllClasses.Rows($CellRow).style ="20% - Accent6" #light green
            
     }
     if ($class.Available -eq 0){
@@ -779,8 +789,8 @@ Write-host "Starting Locations worksheet" -foregroundcolor Green
 
 $worksheetLocations = $workbook.worksheets.Add();
 $worksheetLocations.Name = "Locations"
-    $workbook.ActiveWindow.SplitRow = 1
-    $workbook.ActiveWindow.FreezePanes = $true
+$ExcelObj.ActiveWindow.SplitRow = 1
+$ExcelObj.ActiveWindow.freezePanes = $true;
 
   [int]$i = 1;
 foreach ($c in $LocationColumns){
@@ -795,10 +805,10 @@ foreach ($c in $LocationColumns){
 foreach ($location in $LocationAL){
     [int]$cellColumn = 1;
     if ($location."Owned by" -eq 0){
-        $worksheetLocations.Rows($CellRow).font.colorindex = 2
-        $worksheetLocations.Rows($CellRow).interior.colorindex = 50
+        $worksheetLocations.Rows($CellRow).style ="20% - Accent6"
+        
         if ($location."Location ID" -in $homeports.locationID){
-            $worksheetLocations.Cells($CellRow,$cellColumn).font.bold = $true
+            $worksheetLocations.Rows($CellRow).style ="40% - Accent6"
         }
     }    
 
@@ -812,6 +822,7 @@ foreach ($location in $LocationAL){
 }
 
 $worksheetLocations.columns.autofit()
+$worksheetLocations.AutoFilter
 
 # Save Info Sheet
 Write-host "Starting Save Info worksheet" -foregroundcolor Green
@@ -833,7 +844,7 @@ $worksheetSaveInfo.Cells(8,1) = "Enemy Owned Locations"
 $worksheetSaveInfo.Cells(10,1) = "Game Version" 
 $worksheetSaveInfo.Cells(11,1) = "Save File Name" 
 
-$worksheetSaveInfo.Cells(1,2) = $CampaignName
+$worksheetSaveInfo.Cells(1,2) = $CampaignID
 $worksheetSaveInfo.Cells(2,2) = $CampaignDate 
 $worksheetSaveInfo.Cells(3,2) = $CampaignDay
 
@@ -849,7 +860,9 @@ $worksheetSaveInfo.columns.autofit()
 
 $ExcelObj.visible = $true;
 
-$workbook.SaveAs(("C:\Users\David\OneDrive\Documents\Wots_Scoreboard\" + $ExcelFileName)) 
+$env:OneDrive
+
+$workbook.SaveAs(($OutputPath + $ExcelFileName)) 
 #$excelObj.Quit()
 
 Write-host "Finished" -foregroundcolor Green
