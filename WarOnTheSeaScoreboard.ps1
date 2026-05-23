@@ -21,8 +21,11 @@ if (!(test-path $OutputPath)){
     }
 }
 
-# location for campaign files to test with.
-$TestingPath 
+# Location for campaign files to test with.  Set the path to a campaign file you wish to test with.  Otherwise the script
+# will get your most recent campaign save file.
+# NOTE:  The script uses campaign files to flesh out its info about ships and locations so results may vary wildly if the 
+# campaign save isn't for the current live campaign data, especially for mods.
+$TestCampaignFilePath = $null #"<Path to save file you want to test against>"
 
 $SteamPath = (Get-ItemProperty -Path HKLM:\SOFTWARE\WOW6432Node\Valve\Steam).InstallPath
 $WarOnTheSeaPath = "$SteamPath\steamapps\common\War on the Sea\WarOnTheSea_Data\StreamingAssets"
@@ -39,8 +42,15 @@ $airUnitsDefaultPath =  "$WarOnTheSeaPath\default\language\english\unit\air"
 $campaignFiles = get-childitem -Path $campaignPath 
 $LastSavedFile = ($campaignFiles | where-object VersionInfo -ne $null | Sort-Object LastWriteTime -Descending)[0]
 
+$defaultOnly = $false;
 # Get the content of the last saved game file.
-$CampaignSaveData = get-content  ($CampaignPath + $LastSavedFile.Name) | ConvertFrom-Json
+if ($TestCampaignFilePath){
+    $CampaignSaveData = get-content $TestCampaignFilePath -Raw | ConvertFrom-Json
+}
+else{
+    $CampaignSaveData = get-content  ($CampaignPath + $LastSavedFile.Name) | ConvertFrom-Json
+}
+
 
 #Get the campaignID and faction sides.
 # Nations0 is always the player's side.
@@ -64,8 +74,9 @@ $CampaignDay = ($CampaignDate - $CampaignStartDate).Days
 $campaignLandLocationsFile =  ("$WarOnTheSeaPath\override\campaign\$campaignID" + "\mapLandLocations.txt")
 
 $campaignSeaUnitsFile = ("$WarOnTheSeaPath\override\campaign\$campaignID" + "\seaUnits.txt")
-# if we can't get the the campaign's id in the override folder then this is a default game campaign.
+# if we can't get the campaign's id in the override folder then this is a default game campaign.
 if (!(test-path $campaignSeaUnitsFile)){
+    $defaultOnly = $true;
     $campaignSeaUnitsFile = ("$WarOnTheSeaPath\default\campaign\$campaignID" + "\seaUnits.txt")
     $campaignLandLocationsFile =  ("$WarOnTheSeaPath\default\campaign\$campaignID" + "\mapLandLocations.txt")
 }
@@ -85,38 +96,40 @@ $AllAir = new-Object System.Collections.Hashtable
 foreach ($AirFile in $AirDefaultFiles){
  
     #Write-host $AirFile.Name
-    $AirData = get-content ("$airUnitsDefaultPath\" + $AirFile.Name) | convertFrom-json
-    $AirObj = new-object -typename PSCustomObject
+    $AirData = get-content ("$airUnitsDefaultPath\" + $AirFile.Name)  -Raw | convertFrom-json
+ #   $AirObj = new-object -typename PSCustomObject
      $AirID = $AirFile.Name.substring(0,$AirFile.Name.indexOf(".txt"))
-    add-member -InputObject $AirObj -MemberType NoteProperty -Name "AirID" -Value $AirID
+  #  add-member -InputObject $AirObj -MemberType NoteProperty -Name "AirID" -Value $AirID
      
-    add-member -InputObject $AirObj -MemberType NoteProperty -Name "Name" -Value $AirData.unitName
+  #  add-member -InputObject $AirObj -MemberType NoteProperty -Name "Name" -Value $AirData.unitName
    # Write-host $AirObj
-    $null = $AllAir.add($AirID, $AirData.unitName)
+    $AllAir.add($AirID, $AirData.unitName) | out-null;
     Clear-Variable AirData
+}
+if (!($defaultOnly)){
+    foreach ($AirFile in $AirOverrideFiles){
+    
+       # Write-host $AirFile.Name
+        $AirData = get-content ("$airUnitsOverridePath\" + $AirFile.Name) -Raw | convertFrom-json
+   #     $AirObj = new-object -typename PSCustomObject
+        $AirID = $AirFile.Name.substring(0, $AirFile.Name.indexOf(".txt"))
+   #     add-member -InputObject $AirObj -MemberType NoteProperty -Name "AirID" -Value $AirID
+         
+    #    add-member -InputObject $AirObj -MemberType NoteProperty -Name "Name" -Value $AirData.unitName
+        # Write-host $AirObj
+        if ($AllAir[$AirID]){
+            $AllAir.Item($AirID) =  $AirData.unitName
+        }
+        else{
+            $AllAir.add($AirID, $AirData.unitName) | Out-Null
+        }
+        Clear-Variable AirData
+    }
 }
 
-foreach ($AirFile in $AirOverrideFiles){
-    
-    # Write-host $AirFile.Name
-    $AirData = get-content ("$airUnitsOverridePath\" + $AirFile.Name) | convertFrom-json
-    $AirObj = new-object -typename PSCustomObject
-    $AirID = $AirFile.Name.substring(0, $AirFile.Name.indexOf(".txt"))
-    add-member -InputObject $AirObj -MemberType NoteProperty -Name "AirID" -Value $AirID
-     
-    add-member -InputObject $AirObj -MemberType NoteProperty -Name "Name" -Value $AirData.unitName
-    # Write-host $AirObj
-    if ($AllAir[$AirID]){
-        $null  = $AllAir.Item($AirID) =  $AirData.unitName
-    }
-    else{
-        $null = $AllAir.add($AirID, $AirData.unitName)
-    }
-    Clear-Variable AirData
-}
 
 # Get the potential list of ships from the campaignSeaUnitsFile
-$CampaignShipClasses = get-content  $campaignSeaUnitsFile  | ConvertFrom-Json
+$CampaignShipClasses = get-content  $campaignSeaUnitsFile | ConvertFrom-Json
 
 # get the list of class files from the Sea units folder in the Override path
 Write-Host "Processing sunk ships list from the campaign save file. " -ForegroundColor Green
@@ -162,42 +175,60 @@ $ShipClassHT = @{};
 Write-Host "Processing campaign ship list" -foregroundcolor Green
 $ShipClasses  = new-object System.Collections.arraylist
 
-foreach ($ShipClassID in $CampaignShipClasses.unitID){
+foreach ($CampaignShipClass in $CampaignShipClasses){
     $sunkInClass = ($sunkenShips |where-object ShipClassID -EQ $ShipClassID).count
   
-
+    $ShipClassID = $CampaignShipClass.unitID
 
     $ShipClassFile = "$ShipClassID.txt"
    # $ShipClass
-    if( Test-path ( "$seaUnitsOverridePath\$ShipClassFile")){
-        try{
-            $ShipClassFileContent = Get-Content -Path "$seaUnitsOverridePath\$ShipClassFile"
-            $ShipClassInfo = $ShipClassFileContent.substring(0, $ShipClassFileContent.LastIndexOf('}')+1) | ConvertFrom-Json
-        }
-        catch{
-            Write-host "Error on JSON conversion for Override file $ShipClassFile"
+   if (!($defaultOnly)){
+        if( Test-path ( "$seaUnitsOverridePath\$ShipClassFile")){
+            try{
+                $ShipClassFileContent = Get-Content -Path "$seaUnitsOverridePath\$ShipClassFile" -Raw
+               # $ShipClassFileContent = $ShipClassFileContent.replace('''', '''''')
+                $ShipClassInfo = $ShipClassFileContent.substring($ShipClassFileContent.IndexOf('{'), $ShipClassFileContent.LastIndexOf('}')+1) | ConvertFrom-Json
+            }
+            catch{
+                Write-host "Error on JSON conversion for Override file $ShipClassFile"
 
+            }
         }
-    }
+        else{
+            if (Test-path  "$seaUnitsDefaultPath\$ShipClassFile" ){
+                try{
+                    $ShipClassFileContent = Get-Content -Path "$seaUnitsDefaultPath\$ShipClassFile" -Raw
+                    $ShipClassInfo = $ShipClassFileContent.substring($ShipClassFileContent.IndexOf('{'), $ShipClassFileContent.LastIndexOf('}')+1) | ConvertFrom-Json
+                }
+                catch{
+                    Write-host "Error on JSON conversion for Default file $ShipClassFile"
+                }   
+            
+            }
+            else{
+                Write-host "$ShipClassID unit info not found"
+                
+            }
+        }
+
+    }   
     else{
         if (Test-path  "$seaUnitsDefaultPath\$ShipClassFile" ){
             try{
-                 $ShipClassFileContent = Get-Content -Path "$seaUnitsDefaultPath\$ShipClassFile"
-                  $ShipClassInfo = $ShipClassFileContent.substring(0, $ShipClassFileContent.LastIndexOf('}')+1) | ConvertFrom-Json
+                $ShipClassFileContent = Get-Content -Path "$seaUnitsDefaultPath\$ShipClassFile" -Raw
+                $ShipClassInfo = $ShipClassFileContent.substring(0, $ShipClassFileContent.LastIndexOf('}')+1) | ConvertFrom-Json
             }
             catch{
-                 Write-host "Error on JSON conversion for Default file $ShipClassFile"
+                Write-host "Error on JSON conversion for Default file $ShipClassFile"
             }   
-         
+        
         }
         else{
             Write-host "$ShipClassID unit info not found"
             
         }
-
-
     }
-   
+
     if ($ShipClassInfo){
         $ShipClassName = $ShipClassInfo.unitName
         $ShipNamesInClass = $ShipClassInfo.namesInClass
@@ -224,7 +255,8 @@ foreach ($ShipClassID in $CampaignShipClasses.unitID){
            
         }
     }
-    $ShipData = $ShipDataRaw[0] |ConvertFrom-Json
+   $ShipData = $ShipDataRaw[0] | ConvertFrom-Json
+   
     $ShipType = $ShipData.unitSubtypeString
     if ($ShipData.cargo){
         $ShipPassenger = $ShipData.cargo[0]
@@ -240,7 +272,7 @@ foreach ($ShipClassID in $CampaignShipClasses.unitID){
         $ShipFuel =$null
     }
 
-    $CampaignShipClass = $CampaignShipClasses | Where-Object unitID -eq $ShipClassID
+   # $CampaignShipClass = $CampaignShipClasses | Where-Object unitID -eq $ShipClassID
     $Allied = ($CampaignShipClass.Nation -in $Nations0)
 
     # Getting the list of homeports that can create this ship class.
@@ -304,7 +336,7 @@ foreach ($ShipClassID in $CampaignShipClasses.unitID){
        add-member -InputObject $NewShip -MemberType NoteProperty -Name "ShipName" -Value $Name
        add-member -InputObject $NewShip -MemberType NoteProperty -Name "ShipType" -Value  $ShipType
 
-       add-member -InputObject $NewShip -MemberType NoteProperty -Name "Passenger" -Value $ShipPassenger
+       add-member -InputObject $NewShip -MemberType NoteProperty -Name "Passengers" -Value $ShipPassenger
    
        add-member -InputObject $NewShip -MemberType NoteProperty -Name "Supplies" -Value $ShipSupplies
        add-member -InputObject $NewShip -MemberType NoteProperty -Name "Engineering" -Value $ShipEngineering
@@ -356,7 +388,7 @@ foreach ($ShipClassID in $CampaignShipClasses.unitID){
             }
 
        }
-       add-member -InputObject $NewShip -MemberType NoteProperty -Name "In Formation" -Value $Instance
+    
        
        add-member -InputObject $NewShip -MemberType NoteProperty -Name "ShipInstance" -Value $Instance
 
@@ -366,7 +398,7 @@ foreach ($ShipClassID in $CampaignShipClasses.unitID){
     }
 
     $UnavailableInClass = $unavailableInstances.count
-    [int]$AvailableInClass = $ShipNamesInClass.count - $sunkInClass.count - $UnavailableInClass
+    [int]$AvailableInClass = $ShipNamesInClass.count - $sunkInClass - $UnavailableInClass
      #$AllShips |where-object {($_.shipClassID -eq $classID) -and ($_.available -eq $false)}
 
 
@@ -376,7 +408,7 @@ foreach ($ShipClassID in $CampaignShipClasses.unitID){
     add-member -InputObject  $NewClass -MemberType NoteProperty -Name "ID" -Value $ShipClassID
     add-member -InputObject  $NewClass -MemberType NoteProperty -Name "Class Name" -Value $ShipClassHT[$ShipClassID]
     add-member -InputObject $NewClass -MemberType NoteProperty -Name "Cost" -Value $CampaignShipClass.Cost       
-    add-member -InputObject $NewClass -MemberType NoteProperty -Name "Passenger" -Value $ShipPassenger
+    add-member -InputObject $NewClass -MemberType NoteProperty -Name "Passengers" -Value $ShipPassenger
    
     add-member -InputObject $NewClass -MemberType NoteProperty -Name "Supplies" -Value $ShipSupplies
     add-member -InputObject $NewClass -MemberType NoteProperty -Name "Engineering" -Value $ShipEngineering
@@ -511,7 +543,7 @@ $AllShips |export-csv C:\Temp\AllShips.csv -NoTypeInformation
 Write-Host "Starting Location processing" -foregroundcolor Green
 
 $locationData = $CampaignSaveData.mapLocationSaveData | convertfrom-json
-$locationAL = new-object System.Collections.ArrayList #new-object System.Collections.SortedList
+$AllLocations = new-object System.Collections.ArrayList #new-object System.Collections.SortedList
 
 $locationColumns = @("Location ID", "Location Name", "Owned By",
                     "Port Level", "Airfield Level", "Allied Troops", "Enemy Troops", 
@@ -519,12 +551,17 @@ $locationColumns = @("Location ID", "Location Name", "Owned By",
                     "Airwing Slot 1", "Airwing Slot 2", "Airwing Slot 3", "Airwing Slot 4",
                     "Airwing Replace Date", "Slot 1 Update", "Slot 2 Update", "Slot 3 Update", "Slot 4 Update")
 
+
 foreach ($locationDatum in $locationData){
     
-    $AirwingReplaceDate = (get-date -Year $locationDatum.airwingUpdateDate0List[0] `
+    if ($null -eq $locationDatum.airwingUpdateDate0List){
+         $AirwingReplaceDate = $null;
+    }
+    else{
+        $AirwingReplaceDate = (get-date -Year $locationDatum.airwingUpdateDate0List[0] `
                                     -Month $locationDatum.airwingUpdateDate0List[1] `
                                     -Day  $locationDatum.airwingUpdateDate0List[2] ).Date
-                                    
+    }                           
 
     $NewLocation = New-object -typename PSCustomObject
     [int]$colN = -1
@@ -544,30 +581,48 @@ foreach ($locationDatum in $locationData){
     add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[8] -Value  $locationDatum.engineering[0]
     add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[9] -Value  $locationDatum.fuel[0]
  
-    add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[10] -Value $AllAir[$locationDatum.aircraft0[0]]
-    add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[11] -Value  $AllAir[$locationDatum.aircraft0[1]]
-    add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[12] -Value $AllAir[ $locationDatum.aircraft0[2]]
-    add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[13] -Value  $AllAir[$locationDatum.aircraft0[3]]
+    for ([int]$i =0; $i -lt $locationDatum.aircraft0.count; $i++){
+        add-member -InputObject $NewLocation -MemberType NoteProperty -Name ("Airwing Slot " + ($i+1)) -Value $AllAir[$locationDatum.aircraft0[$i]]
+  
+    }
+ # add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[11] -Value $AllAir[$locationDatum.aircraft0[1]]
+  #  add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[12] -Value $AllAir[$locationDatum.aircraft0[2]]
+ #   add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[13] -Value $AllAir[$locationDatum.aircraft0[3]]
 
-    
-    add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[14] -Value $AirwingReplaceDate
+    if ($AirwingReplaceDate){
+        add-member -InputObject $NewLocation -MemberType NoteProperty -Name "Airwing Replace Date" -Value $AirwingReplaceDate
+    }
+   # add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[14] -Value $AirwingReplaceDate
    
-    add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[15] -Value  $AllAir[$locationDatum.airwingAircraft0[0]]
-    add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[16] -Value  $AllAir[$locationDatum.airwingAircraft0[1]]
-    add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[17] -Value  $AllAir[$locationDatum.airwingAircraft0[2]]
-    add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[18] -Value $AllAir[ $locationDatum.airwingAircraft0[3]]
+    for ([int]$j =0; $j -lt $locationDatum.airwingAircraft0.count; $j++){
+        add-member -InputObject $NewLocation -MemberType NoteProperty -Name ("Slot " + ($j+1) + " Upgrade") -Value $AllAir[$locationDatum.airwingAircraft0[$j]]
+
+    }
+   # add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[15] -Value $AllAir[$locationDatum.airwingAircraft0[0]]
+   # add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[16] -Value $AllAir[$locationDatum.airwingAircraft0[1]]
+   # add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[17] -Value $AllAir[$locationDatum.airwingAircraft0[2]]
+   # add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[18] -Value $AllAir[$locationDatum.airwingAircraft0[3]]
   
 
      
      
 
-    $locationAL.Add($NewLocation) | Out-Null;
+    $AllLocations.Add($NewLocation) | Out-Null;
 
 
 }
-$locationAL = $locationAL |sort-object "Owned By", "Location Name"
+<#
+$LocationCount = $AllLocations.count
+$arrayCheck = @(13..18)
+foreach($i in $arrayCheck){
+    $NullCount = ($AllLocations | where-object $locationColumns[$i] -eq $null ).count
+    if ($NullCount -eq $LocationCount){
+        $AllLocations
+    }
+}#>
+$AllLocations = $AllLocations |sort-object "Owned By", "Location Name"
 
-
+$ShipClasses | export-csv C:\Temp\Locations.csv -NoTypeInformation
 #### Excel spreadsheet
 #
 #
@@ -599,11 +654,11 @@ $worksheetAllShips.rows[1].font.Bold  = $true;
 $worksheetAllShips.rows[1].HorizontalAlignment = "3"
 
 $AllShipsColumns = new-object System.Collections.ArrayList
-$AllShipsColumnsStart = @("Class", "Name","Type","Cost","Passenger Cap.", "Supplies Cap.","Engineering Cap.",
-                     "Fuel Cap.", "Total Ships In Class", "Sunk", "Sunk Date",  "Available", "Player Owned", "Task Force", "Nation",
+$AllShipsColumnsStart = @("Class", "Name","Type","Cost","Passengers", "Supplies","Engineering",
+                     "Fuel", "Total Ships In Class", "Sunk", "Sunk Date",  "Available", "Player Owned", "Task Force", "Nation",
                      "Allied",  "Date Available", "Sunk Yield","Class ID", "Instance");
 
-$AllShipsMembers = @("ShipClassName","ShipName","ShipType","Cost", "ShipPassenger","ShipCargo","ShipEngineering", "ShipFuel", 
+$AllShipsMembers = @("ShipClassName","ShipName","ShipType","Cost", "Passengers","Supplies","Engineering", "Fuel", 
                     "TotalShipsInClass", "Sunk", "sunkDate", "Available", "Player Owned", "Task Force", "Nation", "Allied","DateAvailable", "SunkYield","ShipClassID","ShipInstance")
                                          
 foreach ($c in $AllShipsColumnsStart){
@@ -704,7 +759,7 @@ $worksheetAllClasses.rows(1).font.Bold = $true;
 [int]$cellRow = 2;
 foreach ($class in $ShipClasses){
     [int]$cellColumn = 1;
-    if ($ship."Player Owned"){
+    if ($class."Player Owned"){
        
         $worksheetAllClasses.Rows($CellRow).style ="20% - Accent6" #light green
            
@@ -719,6 +774,15 @@ foreach ($class in $ShipClasses){
             $worksheetAllClasses.Rows($CellRow).font.colorindex = 2       #white
             $worksheetAllClasses.Rows($CellRow).interior.colorindex = 16  #dark gray
         }
+    }
+    if ($class.Available -eq -1){
+        $worksheetAllClasses.Rows($CellRow).font.italic = $true;
+    }
+    # class should not be available yet.
+    if ($class.'Date Available' -gt $CampaignDate){
+        $worksheetAllClasses.Rows($CellRow).font.colorindex = 2       #white
+        $worksheetAllClasses.Rows($CellRow).interior.colorindex = 16  #dark gray
+
     }
     foreach ($c in $AllClassColumns){
         $worksheetAllClasses.Cells($CellRow,$cellColumn) = $class.$c
@@ -780,7 +844,7 @@ foreach ($type in $TypeTotals){
 
   $cellRow++;      
 }
-$worksheetAllTypes.columns.autofit()
+$worksheetAllTypes.columns.autofit() | Out-Null;
 $worksheetAllTypes.AutoFilter
 
 
@@ -789,20 +853,23 @@ Write-host "Starting Locations worksheet" -foregroundcolor Green
 
 $worksheetLocations = $workbook.worksheets.Add();
 $worksheetLocations.Name = "Locations"
+$worksheetLocations.AutoFilter
 $ExcelObj.ActiveWindow.SplitRow = 1
 $ExcelObj.ActiveWindow.freezePanes = $true;
 
+# First row
   [int]$i = 1;
-foreach ($c in $LocationColumns){
+  $LocationColumnNames = $AllLocations[0].psobject.Properties |where-object MemberType -eq "NoteProperty" |select-object Name
+foreach ($c in $LocationColumnNames){
   
-   $worksheetLocations.Cells(1, $i) = $c
+   $worksheetLocations.Cells(1, $i) = $c.Name
    $worksheetLocations.Cells(1, $i).font.bold = $true
    $i++;
 
 }
 
 [int]$cellRow = 2;
-foreach ($location in $LocationAL){
+foreach ($location in $AllLocations){
     [int]$cellColumn = 1;
     if ($location."Owned by" -eq 0){
         $worksheetLocations.Rows($CellRow).style ="20% - Accent6"
@@ -812,7 +879,7 @@ foreach ($location in $LocationAL){
         }
     }    
 
-    foreach ($c in $LocationColumns){
+    foreach ($c in $LocationColumnNames){
         $worksheetLocations.Cells($CellRow,$cellColumn) = $Location.$c
                 
         $cellColumn++;
@@ -821,8 +888,8 @@ foreach ($location in $LocationAL){
   $cellRow++;      
 }
 
-$worksheetLocations.columns.autofit()
-$worksheetLocations.AutoFilter
+$worksheetLocations.columns.autofit() | Out-Null;
+
 
 # Save Info Sheet
 Write-host "Starting Save Info worksheet" -foregroundcolor Green
@@ -850,17 +917,17 @@ $worksheetSaveInfo.Cells(3,2) = $CampaignDay
 
 $worksheetSaveInfo.Cells(5,2) = ($AllShips | Where-Object {($_.Sunk -eq $true) -and ($_.Allied  -eq $true) }).count
 $worksheetSaveInfo.Cells(6,2) = ($AllShips | Where-Object {($_.Sunk -eq $true) -and ($_.Allied -eq $false) }).count
-$worksheetSaveInfo.Cells(7,2) = ($locationAL | where-object "Owned By" -eq 0).count
-$worksheetSaveInfo.Cells(8,2) = ($locationAL | where-object "Owned By" -eq 1).count
+$worksheetSaveInfo.Cells(7,2) = ($AllLocations | where-object "Owned By" -eq 0).count
+$worksheetSaveInfo.Cells(8,2) = ($AllLocations | where-object "Owned By" -eq 1).count
 
 $worksheetSaveInfo.Cells(10,2) = $campaignSaveData.gameVersion
 $worksheetSaveInfo.Cells(11,2) = $LastSavedFile.Name 
 
-$worksheetSaveInfo.columns.autofit()
+$worksheetSaveInfo.columns.autofit() | Out-Null;
 
 $ExcelObj.visible = $true;
 
-$env:OneDrive
+
 
 $workbook.SaveAs(($OutputPath + $ExcelFileName)) 
 #$excelObj.Quit()
