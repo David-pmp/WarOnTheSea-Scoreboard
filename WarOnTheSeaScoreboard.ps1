@@ -75,6 +75,10 @@ $TimeArray = $CampaignSaveData.currentDatetime
 $CampaignDate =  get-Date -year $TimeArray[5] -Month $TimeArray[4] -Day $TimeArray[3] -Hour $TimeArray[2] -Minute $timearray[1] -second $timeArray[0]
 $CampaignDateFileFormat = $TimeArray[5]
 
+$TimeArray = $CampaignSaveData.startDate
+$CampaignStartDate =  get-Date -year $TimeArray[5] -Month $TimeArray[4] -Day $TimeArray[3] -Hour $TimeArray[2] -Minute $timearray[1] -second $timeArray[0]
+$CampaignDay  = ($CampaignDate - $CampaignStartDate).Days
+
 # Mobile formation data for later use.
 $PlayerMobileData = $CampaignSaveData.playerMobileObjectSaveData | convertfrom-json
 $EnemyMobileData = $CampaignSaveData.enemyMobileObjectSaveData | convertfrom-json
@@ -196,7 +200,7 @@ foreach ($CampaignShipClass in $CampaignShipClasses){
         if( Test-path ( "$seaUnitsOverridePath\$ShipClassFile")){
             try{
                 $ShipClassFileContent = Get-Content -Path "$seaUnitsOverridePath\$ShipClassFile" -Raw
-               # $ShipClassFileContent = $ShipClassFileContent.replace('''', '''''')
+            
                 $ShipClassInfo = $ShipClassFileContent.substring($ShipClassFileContent.IndexOf('{'), $ShipClassFileContent.LastIndexOf('}')+1) | ConvertFrom-Json
             }
             catch{
@@ -547,6 +551,18 @@ $AllClasses | export-csv C:\Temp\ShipClasses.csv -NoTypeInformation
 
 #$ShipsEnemyType = $AllClasses | where-object {$_.Allied -eq $false -and $_.ShipType -eq $type} | export-csv C:\Temp\ShipsLostByClass.csv -NoTypeInformation -Append
 
+#Victory Conditions
+$MaxAirAt = $CampaignSaveData.maxAirAt | sort-object
+$MaxPortAt = $CampaignSaveData.maxPortAt | sort-object
+$MustControlLocations =  $campaignSaveData.mustControl | Sort-Object
+
+$MaxAirAtProgress = 0;
+$MaxPortAtProgress = 0;
+$MustControlLocationsProgress = 0;
+
+$MaxAir = $campaignSaveData.maxAirfield
+$MaxPort = $campaignSaveData.maxPort
+
 $AllShips |export-csv C:\Temp\AllShips.csv -NoTypeInformation
 
 #Location Processing
@@ -556,10 +572,13 @@ $locationData = $CampaignSaveData.mapLocationSaveData | convertfrom-json
 $AllLocations = new-object System.Collections.ArrayList #new-object System.Collections.SortedList
 
 $locationColumns = @("Location ID", "Location Name", "Owned By",
-                    "Port Level", "Airfield Level", "Allied Troops", "Enemy Troops", 
+                    "Must Control", "Max Port", "Max Airfield",
+                    "Port Level", "Airfield Level", 
+                    "Allied Troops", "Enemy Troops", 
                     "Allied Supplies", "Allied Engineering", "Allied Fuel",
                     "Airwing Slot 1", "Airwing Slot 2", "Airwing Slot 3", "Airwing Slot 4",
-                    "Airwing Replace Date", "Slot 1 Update", "Slot 2 Update", "Slot 3 Update", "Slot 4 Update")
+                    "Airwing Replace Date", 
+                    "Slot 1 Update", "Slot 2 Update", "Slot 3 Update", "Slot 4 Update")
 
 
 foreach ($locationDatum in $locationData){
@@ -575,29 +594,61 @@ foreach ($locationDatum in $locationData){
 
     $NewLocation = New-object -typename PSCustomObject
     [int]$colN = -1
-    add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[0] -Value $locationDatum.locationID 
+    $locationID = $locationDatum.locationID 
+    add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[0] -Value $locationID 
     add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[1] -Value $locationDatum.locationName
     add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[2] -Value $locationDatum.currentFaction
 
+    if ($locationID -in $MustControlLocations){
+        $MustControl = "Yes"
+        if ($locationDatum.currentFaction -eq '0'){
+            $MustControlLocationsProgress++;
+        }
+    }
+    else{
+         $MustControl = $null;
+    }
+    add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[3] -Value $MustControl
 
-    add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[3] -Value  $locationDatum.portLevel
-    add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[4] -Value  $locationDatum.airfieldLevel
+    if ($locationID -in $MaxPortAt){
+        $IsMaxPort = "Yes"
+        if ($locationDatum.portLevel -eq $MaxPort[0]){
+            $MaxPortAtProgress++;
+        }
+    }
+    else{
+        $IsMaxPort = $null
+    }
+    add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[4] -Value $IsMaxPort 
+
+    if ($locationID -in $MaxAirAt){
+        $IsMaxAir = "Yes"
+        if ($locationDatum.airfieldLevel -eq $MaxAir[0]){
+            $MaxAirAtProgress++;
+        } 
+    }
+    else{
+        $IsMaxAir = $null
+    }
+    add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[5] -Value $IsMaxAir
+
+    add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[6] -Value  $locationDatum.portLevel
+    add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[7] -Value  $locationDatum.airfieldLevel
 
 
-    add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[5] -Value  $locationDatum.troops[0]
-    add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[6] -Value  $locationDatum.troops[1]
 
-    add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[7] -Value  $locationDatum.supplies[0]
-    add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[8] -Value  $locationDatum.engineering[0]
-    add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[9] -Value  $locationDatum.fuel[0]
+
+    add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[8] -Value  $locationDatum.troops[0]
+    add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[9] -Value  $locationDatum.troops[1]
+
+    add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[10] -Value  $locationDatum.supplies[0]
+    add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[11] -Value  $locationDatum.engineering[0]
+    add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[12] -Value  $locationDatum.fuel[0]
  
     for ([int]$i =0; $i -lt $locationDatum.aircraft0.count; $i++){
         add-member -InputObject $NewLocation -MemberType NoteProperty -Name ("Airwing Slot " + ($i+1)) -Value $AllAir[$locationDatum.aircraft0[$i]]
   
     }
- # add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[11] -Value $AllAir[$locationDatum.aircraft0[1]]
-  #  add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[12] -Value $AllAir[$locationDatum.aircraft0[2]]
- #   add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[13] -Value $AllAir[$locationDatum.aircraft0[3]]
 
     if ($AirwingReplaceDate){
         add-member -InputObject $NewLocation -MemberType NoteProperty -Name "Airwing Replace Date" -Value $AirwingReplaceDate
@@ -608,31 +659,15 @@ foreach ($locationDatum in $locationData){
         add-member -InputObject $NewLocation -MemberType NoteProperty -Name ("Slot " + ($j+1) + " Upgrade") -Value $AllAir[$locationDatum.airwingAircraft0[$j]]
 
     }
-   # add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[15] -Value $AllAir[$locationDatum.airwingAircraft0[0]]
-   # add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[16] -Value $AllAir[$locationDatum.airwingAircraft0[1]]
-   # add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[17] -Value $AllAir[$locationDatum.airwingAircraft0[2]]
-   # add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[18] -Value $AllAir[$locationDatum.airwingAircraft0[3]]
-  
-
-     
-     
-
     $AllLocations.Add($NewLocation) | Out-Null;
-
-
 }
-<#
-$LocationCount = $AllLocations.count
-$arrayCheck = @(13..18)
-foreach($i in $arrayCheck){
-    $NullCount = ($AllLocations | where-object $locationColumns[$i] -eq $null ).count
-    if ($NullCount -eq $LocationCount){
-        $AllLocations
-    }
-}#>
+
 $AllLocations = $AllLocations |sort-object "Owned By", "Location Name"
 
 $AllClasses | export-csv C:\Temp\Locations.csv -NoTypeInformation
+
+
+
 #### Excel spreadsheet
 #
 #
@@ -876,9 +911,10 @@ if ($AllLocations){
 
     $worksheetLocations = $workbook.worksheets.Add();
     $worksheetLocations.Name = "Locations"
-    $worksheetLocations.AutoFilter
+   
     $ExcelObj.ActiveWindow.SplitRow = 1
     $ExcelObj.ActiveWindow.freezePanes = $true;
+     $worksheetLocations.AutoFilter;
 
     # First row
     [int]$i = 1;
@@ -887,6 +923,11 @@ if ($AllLocations){
     
     $worksheetLocations.Cells(1, $i) = $c.Name
     $worksheetLocations.Cells(1, $i).font.bold = $true
+    if ($c.Name -in "Must Control", "Max Port", "Max Airfield"){
+        $worksheetLocations.Columns($i).HorizontalAlignment = "3";  #center aligning the column
+    }
+   
+
     $i++;
 
     }
@@ -911,6 +952,8 @@ if ($AllLocations){
     $cellRow++;      
     }
 
+
+
     $worksheetLocations.columns.autofit() | Out-Null;
 }
 else{
@@ -934,8 +977,13 @@ $worksheetSaveInfo.Cells(5,1) = "Player Ships Sunk"
 $worksheetSaveInfo.Cells(6,1) = "Enemy Ships Sunk"
 $worksheetSaveInfo.Cells(7,1) = "Player Owned Locations"
 $worksheetSaveInfo.Cells(8,1) = "Enemy Owned Locations"
-$worksheetSaveInfo.Cells(10,1) = "Game Version" 
-$worksheetSaveInfo.Cells(11,1) = "Campaign File Path" 
+
+$worksheetSaveInfo.Cells(10,1) = "Must Control" 
+$worksheetSaveInfo.Cells(11,1) = "Max Port At" 
+$worksheetSaveInfo.Cells(12,1) = "Max Airfield At" 
+
+$worksheetSaveInfo.Cells(14,1) = "Game Version" 
+$worksheetSaveInfo.Cells(15,1) = "Campaign Save File Path" 
 
 $worksheetSaveInfo.Cells(1,2) = $CampaignID
 $worksheetSaveInfo.Cells(2,2) = $CampaignDate 
@@ -946,8 +994,33 @@ $worksheetSaveInfo.Cells(6,2) = ($AllShips | Where-Object {($_.Sunk -eq $true) -
 $worksheetSaveInfo.Cells(7,2) = ($AllLocations | where-object "Owned By" -eq 0).count
 $worksheetSaveInfo.Cells(8,2) = ($AllLocations | where-object "Owned By" -eq 1).count
 
-$worksheetSaveInfo.Cells(10,2) = $campaignSaveData.gameVersion
-$worksheetSaveInfo.Cells(11,2) = $CampaignPathFile
+$worksheetSaveInfo.Cells(10,2) = ("$MustControlLocationsProgress of " + $MustControlLocations.count)
+if ($MustControlLocationsProgress -eq $MustControlLocations.count){
+    $worksheetSaveInfo.Cells(10,2).style = "Good"
+}
+else{
+    $worksheetSaveInfo.Cells(10,2).style = "Bad"
+}
+
+$worksheetSaveInfo.Cells(11,2) = ("$MaxPortAtProgress of " + $MaxPortAt.count)
+
+if ($MaxPortAtProgress -eq $MaxPortAt.count){
+    $worksheetSaveInfo.Cells(11,2).style = "Good"
+}
+else{
+    $worksheetSaveInfo.Cells(11,2).style = "Bad"
+}
+$worksheetSaveInfo.Cells(12,2) = ("$MaxAirAtProgress of " + $MaxAirAt.count)
+if ($MaxAirAtProgress -eq $MaxAirAt.count){
+    $worksheetSaveInfo.Cells(12,2).style = "Good"
+}
+else{
+    $worksheetSaveInfo.Cells(12,2).style = "Bad"
+}
+
+
+$worksheetSaveInfo.Cells(14,2) = $campaignSaveData.gameVersion
+$worksheetSaveInfo.Cells(15,2) = $CampaignPathFile
 
 $worksheetSaveInfo.Columns(2).HorizontalAlignment = "2";  #left aligning the column
 $worksheetSaveInfo.columns.autofit() | Out-Null;
