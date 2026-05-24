@@ -10,8 +10,17 @@ This script has been developed against Kiko's new Pacific mod for WotS.  It shou
 
 HOW TO USE:
 Download the WarOnTheSeaScoreboard.ps1 script to your downloads folder.
+
 Open up the downloads folder in Windows Explorer
+
 Find the script in the downloads folder.
+
+Right click on the file and select 'run as powershell'
+
+If the above doesn't work, you can also try:
 Right click on the file and select 'copy as path'
-Open Powershell.exe  
+
+Open Powershell.exe (Start menu and search for Powershell)
+
 Type in "." and a space and then paste in the path.  Press Enter to run.
+
