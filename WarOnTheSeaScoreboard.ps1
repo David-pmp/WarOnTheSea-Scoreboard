@@ -190,10 +190,12 @@ $AllShips = new-object System.Collections.ArrayList;
 $AllClasses  = new-object System.Collections.arraylist
 
 foreach ($CampaignShipClass in $CampaignShipClasses){
-    $sunkInClass = ($sunkenShips |where-object ShipClassID -EQ $ShipClassID).count
-  
     $ShipClassID = $CampaignShipClass.unitID
 
+    $sunkInClass = 0;
+    $sunkInClass = ($sunkenShips |where-object ShipClassID -EQ $ShipClassID).count
+  
+    
     $ShipClassFile = "$ShipClassID.txt"
    # $ShipClass
    if (!($defaultOnly)){
@@ -220,7 +222,7 @@ foreach ($CampaignShipClass in $CampaignShipClasses){
             
             }
             else{
-                Write-host "$ShipClassID unit info not found"
+                Write-host "$ShipClassID.txt file not found in either default or override language\english\unit\sea folder"
                 
             }
         }
@@ -238,7 +240,7 @@ foreach ($CampaignShipClass in $CampaignShipClasses){
         
         }
         else{
-            Write-host "$ShipClassID unit info not found"
+            Write-host "$ShipClassID unit info not found in default language\english\unit\sea folder"
             
         }
     }
@@ -265,7 +267,7 @@ foreach ($CampaignShipClass in $CampaignShipClasses){
             $ShipDataRaw = Get-Content -Path ("$seaUnitsDataDefaultPath\$ShipClassID\" + $ShipClassID +"_data.txt") 
         }
         else {
-            Write-host "$ShipclassID full data not available" 
+            Write-host "$ShipclassID _data.txt file not available from default or override $shipClassID folder " 
            
         }
     }
@@ -358,17 +360,17 @@ foreach ($CampaignShipClass in $CampaignShipClasses){
        add-member -InputObject $NewShip -MemberType NoteProperty -Name "TotalShipsInClass" -Value $ShipNamesInClass.count
 
        $ThisShipSunk = $null;
-        $sunk = $false;
+        $sunk =$null;
        $ThisShipSunk = $sunkenships |where-object {($_.ShipClassID -eq $ShipClassID) -and ($_.ShipClassInstance -eq $Instance)}
        if ($ThisShipSunk){
              add-member -InputObject $NewShip -MemberType NoteProperty -Name "SunkDate" -Value $ThisShipSunk.sunkdate
-            $sunk =  $true;
+            $sunk =  "Yes";
        }         
        add-member -InputObject $NewShip -MemberType NoteProperty -Name "Sunk" -Value $sunk
 
        $unavailable =  (($unavailableInstances -contains $Instance) -or ($ShipClassAvailableDate -gt $CampaignDate)) 
-       if ($ShipType -eq "Aircraft_Carrier" -and (!$Allied) -and (!$CampaignSaveData.enemyUsesCarriers)) {$unavailable  = $true; }  
-       if ($ShipType -eq "Submarine" -and (!$Allied) -and (!$CampaignSaveData.enemyUsesSubmarines)){ $unavailable  = $true;}                                        
+       if (($ShipType -eq "Aircraft_Carrier") -and (!$Allied) -and (!$CampaignSaveData.enemyUsesCarriers)) {$unavailable  = $true; }  
+       if (($ShipType -eq "Submarine") -and (!$Allied) -and (!$CampaignSaveData.enemyUsesSubs)){ $unavailable  = $true;}                                        
 
        add-member -InputObject $NewShip -MemberType NoteProperty -Name "Available" -Value (!$unavailable)
 
@@ -412,11 +414,27 @@ foreach ($CampaignShipClass in $CampaignShipClasses){
     }
 
     $UnavailableInClass = $unavailableInstances.count
-    [int]$AvailableInClass = $ShipNamesInClass.count - $sunkInClass - $UnavailableInClass
+    if ($ShipClassAvailableDate -gt $CampaignDate){
+         [int]$AvailableInClass = 0
+         $UnavailableInClass = $ShipNamesInClass.count
+    }
+    else{
+        [int]$AvailableInClass = $ShipNamesInClass.count - $sunkInClass - $UnavailableInClass
+    }
+
+    if (($ShipType -eq "Aircraft_Carrier") -and (!$Allied) -and (!$CampaignSaveData.enemyUsesCarriers)) {
+        [int]$AvailableInClass = 0
+        $UnavailableInClass = $ShipNamesInClass.count
+    }  
+    if (($ShipType -eq "Submarine") -and (!$Allied) -and (!$CampaignSaveData.enemyUsesSubs)){ 
+        [int]$AvailableInClass = 0
+        $UnavailableInClass = $ShipNamesInClass.count
+    }      
+   
      #$AllShips |where-object {($_.shipClassID -eq $classID) -and ($_.available -eq $false)}
 
 
-   # $ThisClass = $AllShips | Where-Object {($_.shipclassID -eq $classID) -and ($_.shipInstance -eq 0)}
+   # Processing the class information
 
     $NewClass = new-object  -typename PSCustomObject
     add-member -InputObject  $NewClass -MemberType NoteProperty -Name "ID" -Value $ShipClassID
@@ -441,8 +459,20 @@ foreach ($CampaignShipClass in $CampaignShipClasses){
          add-member -InputObject  $NewClass -MemberType NoteProperty -Name "Player Owned" -Value $null;
     }
    
-
+  
     add-member -InputObject  $NewClass -MemberType NoteProperty -Name "Class Total" -Value  $ShipNamesInClass.count
+    if ($ShipNamesInClass.count -eq 0){
+        $NewClass.'Class Total' = "Ꝏ"
+        if ($ShipClassAvailableDate -gt $CampaignDate){
+             $NewClass.Available = "0"
+             $NewClass.Unavailable = "Ꝏ"
+        }
+        else{
+            $NewClass.Available =  "Ꝏ"
+        }
+       
+        
+    }
 
     add-member -InputObject  $NewClass -MemberType NoteProperty -Name "Date Available" -Value $ShipClassAvailableDate
     add-member -InputObject  $NewClass -MemberType NoteProperty -Name "Type" -Value  $ShipType
@@ -492,8 +522,12 @@ foreach ($type in $shiptypes.ShipType){
 
     foreach ($ShipClass2 in $ShipsAlliedType){
         $TotalSunkInType += [int]$ShipClass2.Sunk
-        $TotalUnavailableInType += [int]$ShipClass2.Unavailable
-        $TotalInType += [int]$ShipClass2."Class Total"
+       
+       
+        if ($ShipClass2."Class Total" -ne "Ꝏ"){
+            $TotalInType += [int]$ShipClass2."Class Total"
+            $TotalUnavailableInType += [int]$ShipClass2.Unavailable
+        }
         $PlayerOwnedInType += $ShipClass2."Player Owned"
         #Write-host $ShipClass2.sunkInClass $ShipClass2.TotalInClass
     }
@@ -520,9 +554,12 @@ foreach ($type in $shiptypes.ShipType){
     foreach ($ShipClass3 in $ShipsEnemyType){
         #$ShipClass3.ShipclassID
         $TotalSunkInType += [int]$ShipClass3.sunk
-         $TotalUnavailableInType += [int]$ShipClass3.Unavailable
-        $TotalInType += [int]$ShipClass3."Class Total"
-        # Write-host (" " + $ShipClass3.sunkInClass+ " "+ $ShipClass3.TotalInClass)
+        $TotalUnavailableInType += [int]$ShipClass3.Unavailable
+
+        if ($ShipClass3."Class Total" -ne "Ꝏ"){
+             $TotalInType += [int]$ShipClass3."Class Total"
+        }
+       
     }
 
     $NewType = new-object  -typename PSCustomObject
@@ -542,14 +579,8 @@ foreach ($type in $shiptypes.ShipType){
 
 }
 $AllTypes = $AllTypes |sort-object Allied,Type
-$AllTypes | export-csv C:\Temp\ShipsLostByType.csv -NoTypeInformation
-
 $AllClasses = $AllClasses |sort-object Allied, Type, Nation, "Class Name"
-$AllClasses | export-csv C:\Temp\ShipClasses.csv -NoTypeInformation
 
-#$AllShips  = $AllShips | sort-object Allied, Type, ShipClassID 
-
-#$ShipsEnemyType = $AllClasses | where-object {$_.Allied -eq $false -and $_.ShipType -eq $type} | export-csv C:\Temp\ShipsLostByClass.csv -NoTypeInformation -Append
 
 #Victory Conditions
 $MaxAirAt = $CampaignSaveData.maxAirAt | sort-object
@@ -563,7 +594,7 @@ $MustControlLocationsProgress = 0;
 $MaxAir = $campaignSaveData.maxAirfield
 $MaxPort = $campaignSaveData.maxPort
 
-$AllShips |export-csv C:\Temp\AllShips.csv -NoTypeInformation
+
 
 #Location Processing
 Write-Host "Starting Location processing" -foregroundcolor Green
@@ -593,7 +624,7 @@ foreach ($locationDatum in $locationData){
     }                           
 
     $NewLocation = New-object -typename PSCustomObject
-    [int]$colN = -1
+   
     $locationID = $locationDatum.locationID 
     add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[0] -Value $locationID 
     add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[1] -Value $locationDatum.locationName
@@ -635,9 +666,6 @@ foreach ($locationDatum in $locationData){
     add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[6] -Value  $locationDatum.portLevel
     add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[7] -Value  $locationDatum.airfieldLevel
 
-
-
-
     add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[8] -Value  $locationDatum.troops[0]
     add-member -InputObject $NewLocation -MemberType NoteProperty -Name $locationColumns[9] -Value  $locationDatum.troops[1]
 
@@ -664,7 +692,6 @@ foreach ($locationDatum in $locationData){
 
 $AllLocations = $AllLocations |sort-object "Owned By", "Location Name"
 
-$AllClasses | export-csv C:\Temp\Locations.csv -NoTypeInformation
 
 
 
@@ -681,6 +708,14 @@ Write-Host "Processing Excel Spreadsheet" -foregroundcolor Green
 $ExcelFileName = ($CampaignID +"_on_" + $campaigndate.ToString("yyMMdd") + "_at_" +  $campaigndate.ToString("HHmmss") + ".xlsx")
 
 $ExcelObj = New-Object -comobject Excel.Application
+if (-not $ExcelObj){
+    Write-Host "Excel not installed on this computer.  Ending Script.  Supporting files written to c:\temp as .csv" -ForegroundColor Red
+    $AllShips |export-csv C:\Temp\WotsScoreboard_AllShips.csv -NoTypeInformation
+    $AllClasses | export-csv C:\Temp\WotsScoreboard_AllClasses.csv -NoTypeInformation
+    $AllTypes | export-csv C:\Temp\WotsScoreboard_AllTypes.csv -NoTypeInformation
+    $AllLocations | export-csv C:\Temp\WotsScoreboard_AllLocations.csv -NoTypeInformation
+    Exit-PSSession;
+}
 $workbook = $excelObj.Workbooks.Add()
 
 
@@ -815,18 +850,21 @@ if ($AllClasses){
             $worksheetAllClasses.Rows($CellRow).style ="20% - Accent6" #light green
             
         }
+        # All Ships in Class are sunk
         if ($class.Available -eq 0){
+             # All ships in Class are sunk
             if ($class.sunk -gt 0){
                     $worksheetAllClasses.Rows($CellRow).font.colorindex = 2       #white
                     $worksheetAllClasses.Rows($CellRow).interior.colorindex = 1  #black
             }
             else{
-
+                 # Class is unavailable at this date
                 $worksheetAllClasses.Rows($CellRow).font.colorindex = 2       #white
                 $worksheetAllClasses.Rows($CellRow).interior.colorindex = 16  #dark gray
             }
         }
-        if ($class.Available -eq -1){
+          # Is this class effectively unlimited?
+        if ($class.'Class Total' -eq 0){
             $worksheetAllClasses.Rows($CellRow).font.italic = $true;
         }
         # class should not be available yet.
@@ -837,6 +875,12 @@ if ($AllClasses){
         }
         foreach ($c in $AllClassColumns){
             $worksheetAllClasses.Cells($CellRow,$cellColumn) = $class.$c
+
+            # Is this class effectively unlimited?
+            if (($c -eq "Class Total") -and ($class.$c -eq 0)){
+                $worksheetAllClasses.Cells($CellRow,$cellColumn) = "Ꝏ"
+                $worksheetAllClasses.Cells($CellRow,$cellColumn).HorizontalAlignment = 4 # right aligned
+            }
 
             $cellColumn++;
         }
